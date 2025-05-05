@@ -12,32 +12,31 @@ export default function Page() {
     if (!file) return
     setBusy(true)
 
-    // read file as base64
+    // read file → base64 (strip data: prefix)
     const b64 = await new Promise(resolve => {
       const fr = new FileReader()
-      fr.onload = ()=> resolve(fr.result.split(",")[1])
+      fr.onload = () => resolve(fr.result.split(",")[1])
       fr.readAsDataURL(file)
     })
 
-    // call RunPod serverless
+    // call RunPod
     const res = await fetch(
-      `${process.env.NEXT_PUBLIC_RUNPOD_URL}`,
+      process.env.NEXT_PUBLIC_RUNPOD_URL,
       {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
           Authorization: `Bearer ${process.env.NEXT_PUBLIC_RUNPOD_TOKEN}`
         },
-        body: JSON.stringify({ input: { image_base64: b64 } })
+        body: JSON.stringify({ input: { image_base64: b64 }})
       }
     )
-    const payload = await res.json()
-    if (payload.error) {
-      alert(payload.error)
+    const json = await res.json()
+    if (json.error) {
+      alert(json.error)
     } else {
-      setMaskUrl(`data:image/png;base64,${payload.output.mask_base64}`)
+      setMaskUrl(`data:image/png;base64,${json.output.mask_base64}`)
     }
-
     setBusy(false)
   }
 
