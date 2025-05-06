@@ -38,16 +38,17 @@ export default function Page() {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          Authorization: `Bearer ${process.env.NEXT_PUBLIC_RUNPOD_TOKEN}`
+          Authorization: `Bearer ${process.env.NEXT_PUBLIC_RUNPOD_TOKEN}`,
         },
         body: JSON.stringify({
           input: {
             image_base64: b64,
-            image_name: file.name
-          }
-        })
+            image_name: file.name,
+          },
+        }),
       }
-    )
+    );
+    
     const json = await res.json()
     if (json.error) {
       alert(json.error)
