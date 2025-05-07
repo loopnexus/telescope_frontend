@@ -19,30 +19,32 @@ export default function Page() {
   async function handleSubmit() {
     if (!file) return;
     setLoading(true);
-    // 1) read file → base64
+  
     const b64 = await new Promise((resolve) => {
       const fr = new FileReader();
       fr.onload = () => resolve(fr.result.split(",")[1]);
       fr.readAsDataURL(file);
     });
-
+  
     try {
-      // 2) call RunPod endpoint
-      const res = await fetch(process.env.NEXT_PUBLIC_RUNPOD_URL, {
+      // Send image to proxy route
+      const res = await fetch("/api/runpod", {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${process.env.NEXT_PUBLIC_RUNPOD_TOKEN}`,
-        },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           input: {
             image_base64: b64,
-            image_name: file.name,
-          },
+            image_name: file.name
+          }
         }),
       });
-      const json = await res.json();
-      setJsonResult(json);
+  
+      const data = await res.json();
+      if (data.error) {
+        throw new Error(data.error);
+      }
+      
+      setJsonResult(data);
     } catch (err) {
       console.error(err);
       setJsonResult({ error: err.message });
@@ -95,7 +97,7 @@ export default function Page() {
             cursor: !file || loading ? "not-allowed" : "pointer",
           }}
         >
-          {loading ? "Processing…" : "Run Segmentation"}
+          {loading ? "Processing…" : "Run Prediction"}
         </button>
       </div>
 
@@ -127,7 +129,7 @@ export default function Page() {
           </pre>
         )}
         {/* download link */}
-        {jsonResult && (
+        {jsonResult && !jsonResult.error && (
           <a
             href={
               "data:application/json;charset=utf-8," +
