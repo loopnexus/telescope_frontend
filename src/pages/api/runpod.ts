@@ -3,6 +3,11 @@ import type { NextApiRequest, NextApiResponse } from 'next';
 const RUNPOD_BASE_URL = process.env.NEXT_PUBLIC_RUNPOD_URL;
 const RUNPOD_TOKEN = process.env.NEXT_PUBLIC_RUNPOD_TOKEN;
 
+// Validate environment variables
+if (!RUNPOD_BASE_URL || !RUNPOD_TOKEN) {
+  console.error('Missing required environment variables: RUNPOD_BASE_URL or RUNPOD_TOKEN');
+}
+
 interface RunPodOutput {
   image?: string;
   seed?: number;
@@ -19,6 +24,10 @@ interface RunPodStatusResponse {
 }
 
 async function checkJobStatus(jobId: string): Promise<RunPodStatusResponse> {
+  if (!RUNPOD_BASE_URL || !RUNPOD_TOKEN) {
+    throw new Error('Missing RunPod configuration');
+  }
+
   const response = await fetch(`${RUNPOD_BASE_URL}/status/${jobId}`, {
     headers: {
       'Content-Type': 'application/json',
@@ -27,32 +36,43 @@ async function checkJobStatus(jobId: string): Promise<RunPodStatusResponse> {
   });
 
   if (!response.ok) {
-    throw new Error(`Status check failed: ${response.statusText}`);
+    const errorText = await response.text();
+    throw new Error(`Status check failed: ${response.statusText}. Details: ${errorText}`);
   }
 
   return response.json();
 }
 
-async function waitForCompletion(jobId: string, maxAttempts = 30): Promise<RunPodStatusResponse> {
+async function waitForCompletion(jobId: string, maxAttempts = 100): Promise<RunPodStatusResponse> {
   let attempts = 0;
   
   while (attempts < maxAttempts) {
-    const statusData = await checkJobStatus(jobId);
-    
-    if (statusData.status === 'COMPLETED') {
-      return statusData;
+    try {
+      const statusData = await checkJobStatus(jobId);
+      
+      if (statusData.status === 'COMPLETED') {
+        return statusData;
+      }
+      
+      if (statusData.status === 'FAILED') {
+        throw new Error(`Job failed: ${statusData.error || 'Unknown error'}`);
+      }
+      
+      // Wait for 1 second before next attempt
+      await new Promise(resolve => setTimeout(resolve, 1000));
+      attempts++;
+    } catch (error) {
+      console.error(`Attempt ${attempts + 1} failed:`, error);
+      throw error;
     }
-    
-    if (statusData.status === 'FAILED') {
-      throw new Error('Job failed');
-    }
-    
-    // Wait for 2 seconds before next attempt
-    await new Promise(resolve => setTimeout(resolve, 2000));
-    attempts++;
   }
   
-  throw new Error('Max attempts reached waiting for job completion');
+  // Return the last status instead of throwing an error
+  const lastStatus = await checkJobStatus(jobId);
+  return {
+    ...lastStatus,
+    error: 'Max attempts reached waiting for job completion'
+  };
 }
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
@@ -62,6 +82,11 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   }
 
   try {
+    // Validate environment variables
+    if (!RUNPOD_BASE_URL || !RUNPOD_TOKEN) {
+      throw new Error('Missing RunPod configuration');
+    }
+
     // Validate request body
     const { input } = req.body;
     if (!input || !input.image_base64) {
@@ -79,9 +104,12 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     });
 
     if (!response.ok) {
-      const error = await response.json();
-      console.error('[RunPod Error]', error);
-      return res.status(response.status).json({ error: 'RunPod request failed', details: error });
+      const errorText = await response.text();
+      console.error('[RunPod Error]', errorText);
+      return res.status(response.status).json({ 
+        error: 'RunPod request failed', 
+        details: errorText 
+      });
     }
 
     const { id: jobId } = await response.json();
@@ -92,14 +120,19 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     
   } catch (err) {
     console.error('[RunPod Proxy Error]', err);
-    return res.status(500).json({ error: 'RunPod request failed', details: err });
+    return res.status(500).json({ 
+      error: 'RunPod request failed', 
+      details: err instanceof Error ? err.message : 'Unknown error'
+    });
   }
 }
 
 export const config = {
   api: {
     bodyParser: {
-      sizeLimit: '10mb' // adjust as needed
-    }
+      sizeLimit: '10mb'
+    },
+    // Increase the timeout for Netlify
+    maxDuration: 30
   }
 };
