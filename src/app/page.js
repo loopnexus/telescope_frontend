@@ -123,6 +123,7 @@ export default function Page() {
               padding: "1rem",
               borderRadius: 4,
               overflowX: "auto",
+              color: "black",
             }}
           >
             {JSON.stringify(jsonResult, null, 2)}
