@@ -45,21 +45,31 @@ async function checkJobStatus(jobId: string): Promise<RunPodStatusResponse> {
 
 async function waitForCompletion(jobId: string, maxAttempts = 100): Promise<RunPodStatusResponse> {
   let attempts = 0;
+  let lastStatus: RunPodStatusResponse | null = null;
+  
+  console.log(`Starting to wait for job ${jobId} completion...`);
   
   while (attempts < maxAttempts) {
     try {
       const statusData = await checkJobStatus(jobId);
+      lastStatus = statusData;
+      
+      console.log(`Attempt ${attempts + 1}/${maxAttempts} - Status: ${statusData.status}`);
       
       if (statusData.status === 'COMPLETED') {
+        console.log('Job completed successfully');
         return statusData;
       }
       
       if (statusData.status === 'FAILED') {
+        console.error('Job failed:', statusData.error);
         throw new Error(`Job failed: ${statusData.error || 'Unknown error'}`);
       }
       
-      // Wait for 1 second before next attempt
-      await new Promise(resolve => setTimeout(resolve, 1000));
+      // Add exponential backoff for waiting
+      const waitTime = Math.min(1000 * Math.pow(1.5, attempts), 10000);
+      console.log(`Waiting ${waitTime}ms before next attempt...`);
+      await new Promise(resolve => setTimeout(resolve, waitTime));
       attempts++;
     } catch (error) {
       console.error(`Attempt ${attempts + 1} failed:`, error);
@@ -67,8 +77,11 @@ async function waitForCompletion(jobId: string, maxAttempts = 100): Promise<RunP
     }
   }
   
-  // Return the last status instead of throwing an error
-  const lastStatus = await checkJobStatus(jobId);
+  console.warn(`Max attempts (${maxAttempts}) reached. Returning last known status.`);
+  if (!lastStatus) {
+    throw new Error('No status information available after max attempts');
+  }
+  
   return {
     ...lastStatus,
     error: 'Max attempts reached waiting for job completion'
@@ -93,6 +106,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       return res.status(400).json({ error: 'No image_base64 provided' });
     }
 
+    console.log('Sending request to RunPod...');
     // Initial request to start the job
     const response = await fetch(`${RUNPOD_BASE_URL}/run`, {
       method: 'POST',
@@ -113,9 +127,21 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     }
 
     const { id: jobId } = await response.json();
+    console.log(`Job started with ID: ${jobId}`);
     
     // Wait for job completion and get final result
     const result = await waitForCompletion(jobId);
+    
+    if (result.status !== 'COMPLETED') {
+      console.error('Job did not complete successfully:', result);
+      return res.status(500).json({
+        error: 'Job did not complete successfully',
+        status: result.status,
+        details: result.error
+      });
+    }
+    
+    console.log('Job completed successfully, returning results');
     return res.status(200).json(result);
     
   } catch (err) {
